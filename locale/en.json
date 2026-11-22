@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tandem wake",
+    "description": "Wakes a session when the user comments in a Tandem document. Injects one short line; that turn reads the details through tandem_checkInbox."
+  }
+}

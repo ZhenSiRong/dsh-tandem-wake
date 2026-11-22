@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Tandem 唤醒",
+    "description": "用户在 Tandem 文档里留评论时唤醒会话；注入一句话，由这一轮自己去 tandem_checkInbox 取详情。"
+  }
+}
