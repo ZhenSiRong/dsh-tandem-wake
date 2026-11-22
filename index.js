@@ -15,7 +15,7 @@
  * 观测：所有关键动作都追加到 TRACE_PATH，出问题直接读文件，不用猜。
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -25,6 +25,8 @@ export const name = 'tandem-wake'
 export const inject = ['agents', 'sessions']
 
 const TRACE_PATH = '/tmp/tandem-wake.log'
+/** 存在这个文件就完全不轮询 —— 不轮询才不会消费掉别人要看的批注。 */
+const PAUSE_PATH = '/tmp/tandem-wake.pause'
 
 const trace = (line) => {
   try {
@@ -145,11 +147,14 @@ export function apply(ctx, config) {
 
   async function tick() {
     if (disposed) return
+    // 暂停时不发起 checkInbox：Tandem 的未读游标是"轮询即消费"，只要不 poll 就一条都不丢。
+    if (existsSync(PAUSE_PATH)) return
     try {
       const result = await callTool('tandem_checkInbox')
       if (result?.error) { info('checkInbox 报错：' + JSON.stringify(result.error).slice(0, 200)); return }
       const inbox = result?.data ?? {}
       if (inbox.hasNew !== true) return
+      info('取到新批注（已被本插件消费）：' + (inbox.summary ?? ''))
       if (Date.now() - lastInjectAt < minIntervalMs) { info('冷却中，跳过：' + (inbox.summary ?? '')); return }
       wake(inbox, digest(inbox))
     } catch (error) {
@@ -161,7 +166,7 @@ export function apply(ctx, config) {
   ctx.effect(() => {
     const ids = (ctx.agents.list?.() ?? []).map(agent => String(agent.id))
     const resolved = ctx.agents.get(sessionId) !== undefined
-    info('插件已加载，轮询 ' + mcpUrl + ' 每 ' + pollMs + 'ms；目标会话 ' + sessionId + '：'
+    info('插件已加载，轮询 ' + mcpUrl + ' 每 ' + pollMs + 'ms（暂停开关 ' + PAUSE_PATH + '）；目标会话 ' + sessionId + '：'
       + (resolved ? '已解析到（投递用 followup，会主动开轮）' : '找不到！存活 agent：' + (ids.join(', ') || '（无）')))
     const loop = () => { void tick().finally(() => { if (!disposed) { timer = setTimeout(loop, pollMs); timer.unref?.() } }) }
     timer = setTimeout(loop, 1500)

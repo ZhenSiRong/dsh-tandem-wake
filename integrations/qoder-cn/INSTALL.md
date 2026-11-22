@@ -39,6 +39,16 @@ cp commands/tandem-wake.md ~/.qoder-cn/commands/
 
 **注意**：Qoder 没有推送通道，所以这里没有"自动唤醒"——这个命令就是手动取件。要真自动醒，用 DSH 那套宿主插件（见仓库根 README）。
 
+## 和 DSH 插件共存时
+
+两边共用 Tandem 的同一个 inbox，**轮询即消费**。在 Qoder 里用之前先把 DSH 侧暂停，否则它每 4 秒轮询会把批注拿走：
+
+```bash
+touch /tmp/tandem-wake.pause     # 让 DSH 插件停止轮询（不消费）
+# ... 在 Qoder 里 /tandem-wake 干活 ...
+rm /tmp/tandem-wake.pause        # 恢复
+```
+
 ## 验证
 
 ```bash
