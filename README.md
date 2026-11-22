@@ -6,6 +6,14 @@ Tandem 是一个"你和 AI 共享同一份 Markdown"的编辑器：你在浏览�
 
 这个插件补上这一环：**文档里有新评论 → DSH 会话自己开一轮 → 按你说的改。**
 
+![Tandem 文档里的批注与 diff](docs/assets/tandem-comment.png)
+
+*同一份 Markdown：正文里带下划线的是被批注的区间，右边 margin 是 AI 给出的 diff，人点 Accept / Dismiss 决定去留。*
+
+![AI 在文档上写批注的过程](docs/assets/tandem-wake.gif)
+
+*整个过程人没有切窗口：两条建议直接落进 margin，状态栏显示 AI 当前在做什么。*
+
 ## 它怎么工作
 
 ```
@@ -37,6 +45,18 @@ Tandem 确实暴露了 `ws://127.0.0.1:3479/api/wake`，插件第一版就是连
 | 3 | `agent.inject()` 不唤醒 | 它是 `send(input, 'next-step', **false**)`；消息躺进收件箱，等下一次真人说话才被顶出来。要唤醒必须 `followup()`（`next-turn` + `wakeup: true`） |
 
 第 3 条最阴：消息确实进了会话，看起来"发了"，但那一轮永远不会自己开始。
+
+## 复现"wake 通道是死的"
+
+上面第 1 条不是推测，是量出来的。两个脚本可以直接重跑：
+
+```bash
+# 连 /api/wake 听两分钟：能 OPEN，但一帧不落
+node tools/wake-probe.mjs 120
+
+# 验证"MCP 写入不产事件"——所以"机器写一条看它回不回推"这种自测本身无效
+node tools/mcporigin-selftest.mjs <documentId>
+```
 
 ## 安装
 
