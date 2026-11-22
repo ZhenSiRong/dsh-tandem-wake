@@ -1,21 +1,19 @@
 /**
- * tandem-wake —— 把「用户在 Tandem 文档里留了评论」变成当前会话的一条用户消息。
+ * tandem-wake —— 把「Tandem 文档里 @ 了本会话的评论」变成一条用户消息，让会话自己开一轮。
  *
- * v1 走 Tandem 的 `/api/wake` WebSocket，实测**一发帧都收不到**（服务器侧
- * eventCount 恒为 0，订阅者却是连着的）。翻它的源码得到两个结论：
- *   - `CHANNEL_SKIP` 里含 `MCP_ORIGIN`，所以 Agent 自己经 MCP 写入永远不产生事件；
- *   - 批注类事件的对外转发还叠了 mode / licence / local-period 三道门。
- * 与其继续猜哪道门关着，v2 改成**轮询 `tandem_checkInbox`**：那是 Tandem 自己
- * 文档里说明的权威通道（"the authoritative delivery path"），代价只是一次本地
- * HTTP 请求，不产生模型 token。
+ * 三个关键设计（都是踩过坑才定下来的）：
  *
- * 关键取舍：轮询会消耗 checkInbox 的「未读」游标，所以注入的消息里必须带上
- * 这次取到的内容摘要，否则唤醒之后那一轮再查会是空的。
+ * 1. **带 cursor 轮询**。Tandem 的 checkInbox 不带 cursor 时是"一次性、所有无 cursor 的
+ *    调用者共享"——谁先读谁独占（实测吃掉了本该给 Qoder 的评论）。带 cursor 则每个会话
+ *    有独立账本，条目重复到 ack 为止，别的会话读不会把它藏掉。
+ * 2. **@ 决定谁动手，不决定谁能看**。本插件只对带 `@DSH` 的条目动作；没 @ 或 @ 的是别人，
+ *    就静默只读（写日志、不注入、不回复），并且照样 ack，免得条目重复到天荒地老。
+ * 3. **cursor 落盘**，重启不重放旧评论，也不跳过暂停期间攒下的。
  *
- * 观测：所有关键动作都追加到 TRACE_PATH，出问题直接读文件，不用猜。
+ * 暂停开关：/tmp/tandem-wake.pause 存在时完全不轮询 —— 不 poll 就不消费，一条都不丢。
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -25,7 +23,6 @@ export const name = 'tandem-wake'
 export const inject = ['agents', 'sessions']
 
 const TRACE_PATH = '/tmp/tandem-wake.log'
-/** 存在这个文件就完全不轮询 —— 不轮询才不会消费掉别人要看的批注。 */
 const PAUSE_PATH = '/tmp/tandem-wake.pause'
 
 const trace = (line) => {
@@ -35,6 +32,11 @@ const trace = (line) => {
   } catch { /* 日志失败不能影响功能 */ }
 }
 
+/** 条目里是否 @ 了本会话。 */
+const ADDRESS_PATTERN = /@\s*dsh\b/i
+/** 条目里是否 @ 了别的 agent（用来区分"给别人的"与"没人被@"）。 */
+const OTHER_ADDRESS_PATTERN = /@\s*(qoder|claude|codex)\b/i
+
 export function apply(ctx, config) {
   const cfg = config ?? {}
   const mcpUrl = cfg.mcpUrl ?? 'http://127.0.0.1:3479/mcp'
@@ -42,6 +44,7 @@ export function apply(ctx, config) {
   const pollMs = Number(cfg.pollMs ?? 4000)
   const minIntervalMs = Number(cfg.minIntervalMs ?? 10000)
   const maxChars = Number(cfg.maxChars ?? 400)
+  const cursorPath = cfg.cursorPath ?? '/home/zhensirong/.dsh/local/tandem-wake/cursor.json'
 
   let disposed = false
   let timer
@@ -51,7 +54,26 @@ export function apply(ctx, config) {
 
   const info = (...args) => { try { ctx.logger?.info?.(...args) } catch { /* ignore */ } trace(args.join(' ')) }
 
-  /** 打开一次 MCP 会话；Tandem 每进程允许并发会话，但复用一条更省。 */
+  // ---------- cursor 落盘 ----------
+
+  function readCursor() {
+    try {
+      const raw = JSON.parse(readFileSync(cursorPath, 'utf8'))
+      if (typeof raw?.cursor === 'string' && raw.cursor.length > 0) return raw.cursor
+    } catch { /* 首次或文件损坏：从头开始 */ }
+    return 'start'
+  }
+
+  function writeCursor(cursor) {
+    if (typeof cursor !== 'string' || cursor.length === 0) return
+    try {
+      mkdirSync(dirname(cursorPath), { recursive: true })
+      writeFileSync(cursorPath, JSON.stringify({ cursor, updatedAt: new Date().toISOString() }))
+    } catch (error) { info('cursor 落盘失败：' + String(error)) }
+  }
+
+  // ---------- MCP ----------
+
   async function openSession() {
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
     const initResponse = await fetch(mcpUrl, {
@@ -61,7 +83,7 @@ export function apply(ctx, config) {
         jsonrpc: '2.0',
         id: ++rpcId,
         method: 'initialize',
-        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-tandem-wake', version: '2' } },
+        params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'dsh-tandem-wake', version: '3' } },
       }),
     })
     const id = initResponse.headers.get('mcp-session-id')
@@ -72,11 +94,10 @@ export function apply(ctx, config) {
       body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
     })
     session = { id, headers }
-    trace(`mcp session ${id}`)
+    info(`mcp session ${id}`)
     return session
   }
 
-  /** 调一个 MCP 工具，SSE 或 JSON 两种响应都吃。 */
   async function callTool(tool, args = {}) {
     if (session === null) await openSession()
     const body = { jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name: tool, arguments: args } }
@@ -92,26 +113,31 @@ export function apply(ctx, config) {
     return inner === undefined ? json : JSON.parse(inner)
   }
 
-  /** 把这次取到的新内容压成一行，附在注入消息里——轮询已经消费了游标。 */
-  function digest(inbox) {
-    const parts = []
+  // ---------- 分拣 ----------
+
+  /** 把一批条目压成 [{ kind, text, id }]，只保留人写的。 */
+  function userItems(inbox) {
+    const items = []
     for (const item of inbox.userActions ?? []) {
       if (item.author !== 'user') continue
-      parts.push(`· 评论「${String(item.content ?? '').trim()}」`)
+      items.push({ kind: '评论', text: String(item.content ?? '').trim(), id: item.id })
     }
     for (const reply of inbox.userReplies ?? []) {
       if (reply.author !== 'user') continue
-      parts.push(`· 回复「${String(reply.text ?? '').trim()}」`)
+      items.push({ kind: '回复', text: String(reply.text ?? '').trim(), id: reply.id })
     }
     for (const chat of inbox.chatMessages ?? []) {
       if (chat.author === 'claude') continue
-      parts.push(`· 聊天「${String(chat.text ?? '').trim()}」`)
+      items.push({ kind: '聊天', text: String(chat.text ?? '').trim(), id: chat.id })
     }
-    const text = parts.join('\n')
+    return items
+  }
+
+  function digest(items) {
+    const text = items.map(item => `· ${item.kind}「${item.text}」`).join('\n')
     return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text
   }
 
-  /** 目标 agent：配置的 id 优先；配 'auto' 时，只有一个存活 agent 才认领。 */
   function targetAgent() {
     if (sessionId && sessionId !== 'auto') {
       const found = ctx.agents.get(sessionId)
@@ -123,22 +149,21 @@ export function apply(ctx, config) {
     return undefined
   }
 
-  function wake(inbox, content) {
+  function wake(items) {
     const agent = targetAgent()
     if (agent === undefined) { info('找不到会话对应的 agent：' + String(sessionId)); return }
     const text = [
-      '[Tandem] 用户在你正共享的文档里留了话（已从 tandem_checkInbox 取到）：',
-      content || '（内容为空，可能是删除或解决动作）',
-      inbox.summary ? `摘要：${inbox.summary}` : '',
-      '请直接按这条评论处理；需要原文/区间再调用 mcp__tandem__tandem_checkInbox 或 tandem_getContext。',
-    ].filter(Boolean).join('\n')
+      '[Tandem] 用户在共享文档里 @ 了你：',
+      digest(items),
+      '请按这条直接处理；需要原文/区间再调 mcp__tandem__tandem_checkInbox 或 tandem_getContext。',
+    ].join('\n')
 
-    // followup = next-turn + wakeup:true；inject 只入队不唤醒（会一直躺着等人说话）。
     const message = { id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' } }
+    // followup = next-turn + wakeup:true；inject 只入队不唤醒。
     const deliver = typeof agent.followup === 'function' ? agent.followup.bind(agent) : agent.inject.bind(agent)
     deliver(message)
     lastInjectAt = Date.now()
-    info('已注入唤醒：' + (content || '(空)').slice(0, 80))
+    info('已注入唤醒（@DSH）：' + digest(items).slice(0, 80))
     if (agent.status === 'idle') {
       Promise.resolve(ctx.sessions.flush(agent.session))
         .catch(error => info('flush 失败：' + String(error)))
@@ -147,16 +172,30 @@ export function apply(ctx, config) {
 
   async function tick() {
     if (disposed) return
-    // 暂停时不发起 checkInbox：Tandem 的未读游标是"轮询即消费"，只要不 poll 就一条都不丢。
+    // 暂停时不发起 checkInbox：不 poll 就不消费。
     if (existsSync(PAUSE_PATH)) return
     try {
-      const result = await callTool('tandem_checkInbox')
+      const cursor = readCursor()
+      const result = await callTool('tandem_checkInbox', { cursor })
       if (result?.error) { info('checkInbox 报错：' + JSON.stringify(result.error).slice(0, 200)); return }
       const inbox = result?.data ?? {}
+
+      // 读到就 ack：把这一轮返回的 cursor 存下来，下一轮带上，条目才不会永远重复。
+      if (inbox.cursor !== undefined) writeCursor(inbox.cursor)
       if (inbox.hasNew !== true) return
-      info('取到新批注（已被本插件消费）：' + (inbox.summary ?? ''))
-      if (Date.now() - lastInjectAt < minIntervalMs) { info('冷却中，跳过：' + (inbox.summary ?? '')); return }
-      wake(inbox, digest(inbox))
+
+      const items = userItems(inbox)
+      const mine = items.filter(item => ADDRESS_PATTERN.test(item.text))
+      const others = items.filter(item => !ADDRESS_PATTERN.test(item.text) && OTHER_ADDRESS_PATTERN.test(item.text))
+      const unaddressed = items.filter(item => !ADDRESS_PATTERN.test(item.text) && !OTHER_ADDRESS_PATTERN.test(item.text))
+
+      if (mine.length === 0) {
+        const why = others.length > 0 ? `@ 的是别人（${others.length} 条）` : `没人被 @（${unaddressed.length} 条）`
+        info('旁观：' + why + '，按约定不动手；内容：' + digest(items).replace(/\n/g, ' ').slice(0, 200))
+        return
+      }
+      if (Date.now() - lastInjectAt < minIntervalMs) { info('冷却中，跳过：' + digest(mine).slice(0, 120)); return }
+      wake(mine)
     } catch (error) {
       info('轮询失败：' + String(error))
       session = null // 下一轮重新握手
@@ -164,10 +203,9 @@ export function apply(ctx, config) {
   }
 
   ctx.effect(() => {
-    const ids = (ctx.agents.list?.() ?? []).map(agent => String(agent.id))
     const resolved = ctx.agents.get(sessionId) !== undefined
-    info('插件已加载，轮询 ' + mcpUrl + ' 每 ' + pollMs + 'ms（暂停开关 ' + PAUSE_PATH + '）；目标会话 ' + sessionId + '：'
-      + (resolved ? '已解析到（投递用 followup，会主动开轮）' : '找不到！存活 agent：' + (ids.join(', ') || '（无）')))
+    info('插件已加载（cursor 模式），轮询 ' + mcpUrl + ' 每 ' + pollMs + 'ms；cursor ' + cursorPath
+      + '；目标会话 ' + sessionId + '：' + (resolved ? '已解析到（followup 开轮）' : '找不到！'))
     const loop = () => { void tick().finally(() => { if (!disposed) { timer = setTimeout(loop, pollMs); timer.unref?.() } }) }
     timer = setTimeout(loop, 1500)
     timer.unref?.()

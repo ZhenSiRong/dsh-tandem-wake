@@ -124,6 +124,29 @@ mcp session b03c7064-…
 
 排查顺序：会话是否"已解析到" → 有没有"已注入唤醒" → 有注入但没开轮就是投递方式退化了。
 
+## 谁来动手：@ 路由
+
+多个宿主共用一个 Tandem 时，靠正文里的 @ 决定**谁动手**：
+
+| 条目 | 谁动 |
+|---|---|
+| `@DSH …` | 本插件唤醒会话，由模型处理 |
+| `@Qoder …` | 本插件只当旁观者（读日志、不注入、不改文档） |
+| **没有任何 @** | **谁都不动手** |
+
+设计取舍：宁可"忘了 @ 的活没人干"，也不要"两边抢着改同一段"。术语见 [`GLOSSARY.md`](GLOSSARY.md)。
+
+### 账本（cursor）—— 决定谁能读到
+
+Tandem 的 `tandem_checkInbox` 有两种语义：
+
+- **带 `cursor`**：每个消费者独立账本，条目重复投递到你 ack；别的消费者读不会把它从你这里藏掉。
+- **不带 `cursor`**：条目投递一次，**所有不带 cursor 的调用者共享** —— 谁先读谁独占。
+
+本插件用第一种，cursor 落在 `cursor.json`（已 gitignore），重启不重放。
+
+> **版本要求**：`cursor` 是 Tandem **0.32+** 的能力。跑在 0.28 上时服务端不认这个参数，会退化成"共享一次性投递"——此时只能靠下面的静音开关错开。用 `qoderclicn`/`tandem doctor` 或 `curl -s localhost:3479/api/info | grep version` 确认版本。
+
 ## 和别的宿主共用同一个文档（重要）
 
 Tandem 只有**一个 inbox**：`tandem_checkInbox` 返回"上次 poll 之后没给过的"，**轮询即消费**。所以如果同时有第二个人在消费它（比如 Qoder CN 里手动敲 `/tandem-wake`），**谁先 poll 谁拿走**，另一边就再也看不到了。
@@ -135,7 +158,7 @@ touch /tmp/tandem-wake.pause    # 暂停：插件完全不轮询，一条批注�
 rm /tmp/tandem-wake.pause       # 恢复
 ```
 
-在 Qoder / Claude Code 里干活前先 `touch`，干完再 `rm`。反过来也成立：暂停期间写下的批注会攒着，恢复后一次取走。
+在 Qoder / Claude Code 里干活前先 `touch`，干完再 `rm`。暂停期间写下的批注会攒着，恢复后一次取走。**支持 cursor 的版本上这一步只是保险；不支持时它是唯一能避免抢件的手段。**
 
 ## 已知限制
 

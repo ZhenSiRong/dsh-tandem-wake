@@ -8,3 +8,5 @@
         pollMs: 4000
         minIntervalMs: 10000
         maxChars: 400
+        # cursor 账本：重启不重放；放在 bundle 目录里，已进 .gitignore
+        cursorPath: /home/zhensirong/.dsh/local/tandem-wake/cursor.json

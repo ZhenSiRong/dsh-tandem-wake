@@ -18,9 +18,10 @@ description: 检查 Tandem 文档里的新批注并逐条处理（不自动接�
 
    如果用户只是想试效果、不想动真文件，建议先把内容复制到临时路径再开副本。
 
-1. **取件**：调用 MCP 工具 `tandem_checkInbox`（若工具名带前缀，形如 `mcp__tandem__tandem_checkInbox`）。
+1. **取件**：调用 MCP 工具 `tandem_checkInbox`（如果你的宿主支持 `cursor` 参数，**一定要带上并回传**：不带 cursor 时条目是所有调用者共享的一次性投递，会把本该给别人的评论取走；带 cursor 则每个消费者独立账本）。
+   取到之后**先分拣**：只有正文里 `@Qoder` 的条目才归你处理；`@DSH` 的是别人的；**没有任何 @ 的，谁都不动手**（只读、只报告）。（若工具名带前缀，形如 `mcp__tandem__tandem_checkInbox`）。
    - 返回 `hasNew: false` → 回一句「Tandem 没有新批注」，**结束本轮，不要做任何编辑**。
-2. **定位**：对每条 `author === "user"` 的评注，用 `tandem_resolveRange`（按评注里的 `textSnippet`）或 `tandem_getContext` 拿到它实际锚定的文本与上下文。
+2. **定位**：对每条 `author === "user"` 且 `@Qoder` 的评注，用 `tandem_resolveRange`（按评注里的 `textSnippet`）或 `tandem_getContext` 拿到它实际锚定的文本与上下文。
    - 拿不到锚点（文本已被改动）→ 用 `tandem_search` 找最接近的一段；仍找不到就在对话里说明，不要猜着改。
 3. **给建议**：用 `tandem_comment` 在**同一区间**上写一条建议：
    - `text`：用中文说明**为什么**这么改（一句话，说清取舍，不要复述原文）。
@@ -30,6 +31,7 @@ description: 检查 Tandem 文档里的新批注并逐条处理（不自动接�
 
 ## 硬性边界
 
+- **没 @ 你就不动手**：没 @任何人、或 @ 的是别家的条目，一律只读 + 一句话报告（"这条没有 @ 我"），不要替人决定。
 - **只读文档一律不动手**（`readOnly: true`），先要人换成磁盘路径再谈编辑。
 - **绝不代替人点 Accept**：`tandem_resolveAnnotation` 只允许对**你自己写的**建议做 dismiss（撤回），不接受。
 - 一次只处理评注锚定的那一块；不要顺带"优化"别的段落。
