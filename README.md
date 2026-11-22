@@ -10,9 +10,11 @@ Tandem 是一个"你和 AI 共享同一份 Markdown"的编辑器：你在浏览�
 
 *同一份 Markdown：正文里带下划线的是被批注的区间，右边 margin 是 AI 给出的 diff，人点 Accept / Dismiss 决定去留。*
 
-![AI 在文档上写批注的过程](docs/assets/tandem-wake.gif)
+![完整旅程：人写一句 → AI 自己在 margin 回一个 diff → 人点 Accept](docs/assets/demo-journey.gif)
 
-*整个过程人没有切窗口：两条建议直接落进 margin，状态栏显示 AI 当前在做什么。*
+*完整旅程（约 30 秒）：拖选 → 右键 Annotate → 用中文写要求 → Ctrl+Enter → AI 把 diff 放进 margin → 人点 Accept → 正文当场替换。全程没有切窗口。
+
+[下载 MP4 版](docs/assets/demo-journey.mp4)（更清晰、可暂停）· [Tandem 部署运行指南](docs/TANDEM-SETUP.md)*
 
 ## 它怎么工作
 
