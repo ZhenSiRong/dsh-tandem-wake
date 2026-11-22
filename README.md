@@ -57,7 +57,7 @@ qoderclicn mcp add tandem http://127.0.0.1:3479/mcp -t http -s user   # 注册 M
 cp integrations/qoder-cn/commands/tandem-wake.md ~/.qoder-cn/commands/ # 放命令
 ```
 
-然后在 Agent 对话框里敲 `/tandem-wake`：它会 `tandem_checkInbox` 取新批注 → 定位区间 → 给建议（不代替人点 Accept）。
+然后在 Agent 对话框里敲 `/tandem-wake`：它会先查文档是否 `readOnly`（上传件是写死的只读，得用磁盘路径重开），再 `tandem_checkInbox` 取新批注 → 定位区间 → 给建议（不代替人点 Accept）。
 
 细节见 [`integrations/qoder-cn/INSTALL.md`](integrations/qoder-cn/INSTALL.md)。
 

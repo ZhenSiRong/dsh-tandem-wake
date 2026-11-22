@@ -9,6 +9,15 @@ description: 检查 Tandem 文档里的新批注并逐条处理（不自动接�
 
 ## 执行步骤
 
+0. **先看文档能不能改**（这一步最容易翻车）：调用 `tandem_listDocuments`，看目标文档的 `readOnly` 与 `source`。
+
+   | 看到 | 含义 | 怎么办 |
+   |---|---|---|
+   | `readOnly: true` + `source: "upload"` | 拖拽上传的副本，Tandem 在 `openFromUpload()` 里把只读**写死**（没有磁盘路径，改不回去） | **不要尝试编辑**。告诉人：用磁盘上的真实路径 `tandem_open({filePath})` 重开；顺带提醒只有 `md`/`txt`/`docx` 可编辑，`.html` 打开就是只读 |
+   | `readOnly: false` + `source: "file"` | 正常 | 继续，但要提醒人：**Accept 之后会自动写回磁盘文件**，`git status` 会看到改动 |
+
+   如果用户只是想试效果、不想动真文件，建议先把内容复制到临时路径再开副本。
+
 1. **取件**：调用 MCP 工具 `tandem_checkInbox`（若工具名带前缀，形如 `mcp__tandem__tandem_checkInbox`）。
    - 返回 `hasNew: false` → 回一句「Tandem 没有新批注」，**结束本轮，不要做任何编辑**。
 2. **定位**：对每条 `author === "user"` 的评注，用 `tandem_resolveRange`（按评注里的 `textSnippet`）或 `tandem_getContext` 拿到它实际锚定的文本与上下文。
@@ -21,6 +30,7 @@ description: 检查 Tandem 文档里的新批注并逐条处理（不自动接�
 
 ## 硬性边界
 
+- **只读文档一律不动手**（`readOnly: true`），先要人换成磁盘路径再谈编辑。
 - **绝不代替人点 Accept**：`tandem_resolveAnnotation` 只允许对**你自己写的**建议做 dismiss（撤回），不接受。
 - 一次只处理评注锚定的那一块；不要顺带"优化"别的段落。
 - 评注是命令（"翻译成英文"）就照做；是提问（"这句是不是太虚"）就回答并在必要时给建议，别擅自重写。
