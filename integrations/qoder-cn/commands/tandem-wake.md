@@ -1,0 +1,31 @@
+---
+name: tandem-wake
+description: 检查 Tandem 文档里的新批注并逐条处理（不自动接受，只出建议）
+---
+
+# /tandem-wake
+
+把「人在 Tandem 文档里留的话」搬到这次对话里处理掉。适用于 Qoder CN 这种不支持 push 通知的宿主：**没有后台唤醒，所以你手动敲一次这个命令**。
+
+## 执行步骤
+
+1. **取件**：调用 MCP 工具 `tandem_checkInbox`（若工具名带前缀，形如 `mcp__tandem__tandem_checkInbox`）。
+   - 返回 `hasNew: false` → 回一句「Tandem 没有新批注」，**结束本轮，不要做任何编辑**。
+2. **定位**：对每条 `author === "user"` 的评注，用 `tandem_resolveRange`（按评注里的 `textSnippet`）或 `tandem_getContext` 拿到它实际锚定的文本与上下文。
+   - 拿不到锚点（文本已被改动）→ 用 `tandem_search` 找最接近的一段；仍找不到就在对话里说明，不要猜着改。
+3. **给建议**：用 `tandem_comment` 在**同一区间**上写一条建议：
+   - `text`：用中文说明**为什么**这么改（一句话，说清取舍，不要复述原文）。
+   - `suggestedText`：替换后的文本，**保持原文语言**与 Markdown 结构。
+   - 带上 `textSnapshot` 防止区间漂移。
+4. **回报**：用 `tandem_annotationReply` 或 `tandem_reply` 回一句话，告诉人你动了哪里；然后在对话里列出「评注 → 我建议了什么」。
+
+## 硬性边界
+
+- **绝不代替人点 Accept**：`tandem_resolveAnnotation` 只允许对**你自己写的**建议做 dismiss（撤回），不接受。
+- 一次只处理评注锚定的那一块；不要顺带"优化"别的段落。
+- 评注是命令（"翻译成英文"）就照做；是提问（"这句是不是太虚"）就回答并在必要时给建议，别擅自重写。
+- 拿不准就只回答、不改文档。
+
+## 前提
+
+宿主里要已配置 Tandem MCP：端点 `http://127.0.0.1:3479/mcp`（Tandem 在跑时才有）。连不上就先提示用户启动 `tandem`。

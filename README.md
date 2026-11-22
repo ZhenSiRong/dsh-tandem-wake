@@ -48,6 +48,19 @@ Tandem 确实暴露了 `ws://127.0.0.1:3479/api/wake`，插件第一版就是连
 
 第 3 条最阴：消息确实进了会话，看起来"发了"，但那一轮永远不会自己开始。
 
+## 在别的宿主里用（没有自动唤醒时）
+
+不是每个宿主都能让插件主动开轮。**Qoder CN** 这类 IDE 插件只能手动取件，所以补一个 `/tandem-wake` 命令：
+
+```bash
+qoderclicn mcp add tandem http://127.0.0.1:3479/mcp -t http -s user   # 注册 MCP
+cp integrations/qoder-cn/commands/tandem-wake.md ~/.qoder-cn/commands/ # 放命令
+```
+
+然后在 Agent 对话框里敲 `/tandem-wake`：它会 `tandem_checkInbox` 取新批注 → 定位区间 → 给建议（不代替人点 Accept）。
+
+细节见 [`integrations/qoder-cn/INSTALL.md`](integrations/qoder-cn/INSTALL.md)。
+
 ## 复现"wake 通道是死的"
 
 上面第 1 条不是推测，是量出来的。两个脚本可以直接重跑：
