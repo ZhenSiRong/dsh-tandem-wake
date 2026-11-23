@@ -32,10 +32,13 @@ const trace = (line) => {
   } catch { /* 日志失败不能影响功能 */ }
 }
 
-/** 条目里是否 @ 了本会话。 */
-const ADDRESS_PATTERN = /@\s*dsh\b/i
+/**
+ * 条目里是否 @ 了本会话。
+ * 同时接受半角 @ 与全角 ＠（中文输入法默认出全角），并允许中间有空格。
+ */
+const ADDRESS_PATTERN = /(?:^|[\\s（(【\\[，。、；：！？\u4e00-\u9fff])[@＠]\\s*dsh\\b/i
 /** 条目里是否 @ 了别的 agent（用来区分"给别人的"与"没人被@"）。 */
-const OTHER_ADDRESS_PATTERN = /@\s*(qoder|claude|codex)\b/i
+const OTHER_ADDRESS_PATTERN = /(?:^|[\\s（(【\\[，。、；：！？\u4e00-\u9fff])[@＠]\\s*(qoder|claude|codex)\\b/i
 
 export function apply(ctx, config) {
   const cfg = config ?? {}
